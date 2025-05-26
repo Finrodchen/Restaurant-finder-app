@@ -7,6 +7,12 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#667eea">
     <title>美食探索 - 餐廳推薦</title>
+    <!-- 添加 Google Places API -->
+    <script>
+        // 從環境變數獲取 API 金鑰
+        const GOOGLE_MAPS_API_KEY = 'YOUR_API_KEY';
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places"></script>
     <style>
         * {
             margin: 0;
@@ -581,93 +587,140 @@
                 const container = document.getElementById('restaurantsContainer');
                 container.innerHTML = '<div class="loading">🔍 正在搜尋附近的餐廳...</div>';
 
-                // 模擬API呼叫和資料處理
-                setTimeout(() => {
-                    this.restaurants = this.generateMockRestaurants();
-                    this.displayRestaurants(this.restaurants);
-                }, 1500);
-            }
-
-            generateMockRestaurants() {
                 const cuisineType = document.getElementById('cuisineType').value;
                 const priceRange = document.getElementById('priceRange').value;
+                const radius = document.getElementById('searchRadius').value;
 
-                const mockData = [
-                    {
-                        id: 1,
-                        name: '金龍餐廳',
-                        type: 'chinese',
-                        rating: 4.5,
-                        reviewCount: 156,
-                        priceLevel: 2,
-                        address: '台北市大安區復興南路一段123號',
-                        distance: 0.3,
-                        cuisine: '中式料理',
-                        phone: '02-2345-6789'
-                    },
-                    {
-                        id: 2,
-                        name: '櫻花日本料理',
-                        type: 'japanese',
-                        rating: 4.7,
-                        reviewCount: 89,
-                        priceLevel: 3,
-                        address: '台北市信義區忠孝東路四段567號',
-                        distance: 0.8,
-                        cuisine: '日式料理',
-                        phone: '02-8765-4321'
-                    },
-                    {
-                        id: 3,
-                        name: '韓式烤肉館',
-                        type: 'korean',
-                        rating: 4.3,
-                        reviewCount: 203,
-                        priceLevel: 2,
-                        address: '台北市松山區南京東路三段456號',
-                        distance: 1.2,
-                        cuisine: '韓式料理',
-                        phone: '02-1234-5678'
-                    },
-                    {
-                        id: 4,
-                        name: 'Pasta House',
-                        type: 'italian',
-                        rating: 4.6,
-                        reviewCount: 127,
-                        priceLevel: 3,
-                        address: '台北市中正區忠孝西路一段789號',
-                        distance: 1.5,
-                        cuisine: '義式料理',
-                        phone: '02-9876-5432'
-                    },
-                    {
-                        id: 5,
-                        name: '泰式風情',
-                        type: 'thai',
-                        rating: 4.4,
-                        reviewCount: 94,
-                        priceLevel: 2,
-                        address: '台北市萬華區西門街321號',
-                        distance: 2.1,
-                        cuisine: '泰式料理',
-                        phone: '02-5555-6666'
+                try {
+                    const service = new google.maps.places.PlacesService(document.createElement('div'));
+                    
+                    const request = {
+                        location: new google.maps.LatLng(this.userLocation.lat, this.userLocation.lng),
+                        radius: parseInt(radius),
+                        type: ['restaurant'],
+                        keyword: cuisineType ? this.getCuisineKeyword(cuisineType) : undefined
+                    };
+
+                    service.nearbySearch(request, (results, status) => {
+                        if (status === google.maps.places.PlacesServiceStatus.OK) {
+                            // 過濾價格範圍
+                            let filteredResults = results;
+                            if (priceRange) {
+                                filteredResults = results.filter(place => 
+                                    place.price_level === parseInt(priceRange)
+                                );
+                            }
+
+                            // 獲取詳細資訊
+                            this.getPlaceDetails(filteredResults, service);
+                        } else {
+                            container.innerHTML = '<div class="loading">😔 搜尋時發生錯誤，請稍後再試</div>';
+                            console.error('Places API 錯誤:', status);
+                        }
+                    });
+                } catch (error) {
+                    container.innerHTML = '<div class="loading">😔 搜尋時發生錯誤，請稍後再試</div>';
+                    console.error('搜尋錯誤:', error);
+                }
+            }
+
+            getPlaceDetails(places, service) {
+                const container = document.getElementById('restaurantsContainer');
+                this.restaurants = [];
+
+                if (places.length === 0) {
+                    container.innerHTML = '<div class="loading">😔 沒有找到符合條件的餐廳</div>';
+                    return;
+                }
+
+                let processedCount = 0;
+                const totalPlaces = places.length;
+
+                places.forEach(place => {
+                    service.getDetails({
+                        placeId: place.place_id,
+                        fields: ['name', 'rating', 'user_ratings_total', 'price_level', 
+                                'formatted_address', 'formatted_phone_number', 'types']
+                    }, (placeDetails, status) => {
+                        if (status === google.maps.places.PlacesServiceStatus.OK) {
+                            const restaurant = {
+                                id: place.place_id,
+                                name: placeDetails.name,
+                                rating: placeDetails.rating || 0,
+                                reviewCount: placeDetails.user_ratings_total || 0,
+                                priceLevel: placeDetails.price_level || 1,
+                                address: placeDetails.formatted_address,
+                                phone: placeDetails.formatted_phone_number,
+                                cuisine: this.getCuisineType(placeDetails.types),
+                                distance: this.calculateDistance(
+                                    this.userLocation.lat,
+                                    this.userLocation.lng,
+                                    place.geometry.location.lat(),
+                                    place.geometry.location.lng()
+                                )
+                            };
+
+                            this.restaurants.push(restaurant);
+                        }
+
+                        processedCount++;
+                        if (processedCount === totalPlaces) {
+                            // 按評分排序
+                            this.restaurants.sort((a, b) => b.rating - a.rating);
+                            this.displayRestaurants(this.restaurants);
+                        }
+                    });
+                });
+            }
+
+            getCuisineKeyword(cuisineType) {
+                const cuisineMap = {
+                    'chinese': '中餐廳',
+                    'japanese': '日本料理',
+                    'korean': '韓國料理',
+                    'western': '西餐廳',
+                    'italian': '義大利餐廳',
+                    'thai': '泰國料理',
+                    'vietnamese': '越南料理',
+                    'indian': '印度料理'
+                };
+                return cuisineMap[cuisineType] || '';
+            }
+
+            getCuisineType(types) {
+                const cuisineTypes = {
+                    'chinese_restaurant': '中式料理',
+                    'japanese_restaurant': '日式料理',
+                    'korean_restaurant': '韓式料理',
+                    'italian_restaurant': '義式料理',
+                    'thai_restaurant': '泰式料理',
+                    'vietnamese_restaurant': '越式料理',
+                    'indian_restaurant': '印度料理'
+                };
+
+                for (const type of types) {
+                    if (cuisineTypes[type]) {
+                        return cuisineTypes[type];
                     }
-                ];
-
-                // 根據篩選條件過濾
-                let filtered = mockData;
-
-                if (cuisineType) {
-                    filtered = filtered.filter(r => r.type === cuisineType);
                 }
+                return '其他料理';
+            }
 
-                if (priceRange) {
-                    filtered = filtered.filter(r => r.priceLevel === parseInt(priceRange));
-                }
+            calculateDistance(lat1, lon1, lat2, lon2) {
+                const R = 6371; // 地球半徑（公里）
+                const dLat = this.deg2rad(lat2 - lat1);
+                const dLon = this.deg2rad(lon2 - lon1);
+                const a = 
+                    Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) * 
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                const distance = R * c;
+                return parseFloat(distance.toFixed(1));
+            }
 
-                // 按評分排序
-                return filtered.sort((a, b) => b.rating - a.rating);
+            deg2rad(deg) {
+                return deg * (Math.PI/180);
             }
 
             displayRestaurants(restaurants) {
